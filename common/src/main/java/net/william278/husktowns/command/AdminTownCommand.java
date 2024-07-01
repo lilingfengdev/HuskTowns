@@ -29,12 +29,10 @@ import net.william278.husktowns.user.OnlineUser;
 import org.jetbrains.annotations.NotNull;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.*;
 import java.util.stream.IntStream;
+
+import static net.william278.husktowns.config.Settings.TownSettings;
 
 public final class AdminTownCommand extends Command {
     public AdminTownCommand(@NotNull HuskTowns plugin) {
@@ -44,18 +42,18 @@ public final class AdminTownCommand extends Command {
         setDefaultExecutor(getHelpCommand());
 
         final ArrayList<ChildCommand> childCommands = new ArrayList<>(Arrays.asList(
-                new AdminClaimCommand(this, plugin, true),
-                new AdminClaimCommand(this, plugin, false),
-                new AdminToggleCommand(this, plugin, AdminToggleCommand.Type.IGNORE_CLAIMS),
-                new AdminToggleCommand(this, plugin, AdminToggleCommand.Type.CHAT_SPY),
-                new ManageTownCommand(this, plugin, ManageTownCommand.Type.DELETE),
-                new ManageTownCommand(this, plugin, ManageTownCommand.Type.TAKE_OVER),
-                new ManageBalanceCommand(this, plugin),
-                new SetLevelCommand(this, plugin),
-                new PruneCommand(this, plugin),
-                new TownBonusCommand(this, plugin)
+            new AdminClaimCommand(this, plugin, true),
+            new AdminClaimCommand(this, plugin, false),
+            new AdminToggleCommand(this, plugin, AdminToggleCommand.Type.IGNORE_CLAIMS),
+            new AdminToggleCommand(this, plugin, AdminToggleCommand.Type.CHAT_SPY),
+            new ManageTownCommand(this, plugin, ManageTownCommand.Type.DELETE),
+            new ManageTownCommand(this, plugin, ManageTownCommand.Type.TAKE_OVER),
+            new ManageBalanceCommand(this, plugin),
+            new SetLevelCommand(this, plugin),
+            new PruneCommand(this, plugin),
+            new TownBonusCommand(this, plugin)
         ));
-        if (plugin.getSettings().doAdvancements()) {
+        if (plugin.getSettings().getGeneral().isDoAdvancements()) {
             childCommands.add(new AdvancementCommand(this, plugin));
         }
         childCommands.add((ChildCommand) getDefaultExecutor());
@@ -66,7 +64,7 @@ public final class AdminTownCommand extends Command {
     public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
         if (!plugin.isLoaded()) {
             plugin.getLocales().getLocale("error_not_loaded")
-                    .ifPresent(executor::sendMessage);
+                .ifPresent(executor::sendMessage);
             return;
         }
         super.execute(executor, args);
@@ -77,7 +75,7 @@ public final class AdminTownCommand extends Command {
 
         protected AdminClaimCommand(@NotNull Command parent, @NotNull HuskTowns plugin, boolean creatingClaim) {
             super(creatingClaim ? "claim" : "unclaim", List.of(), parent,
-                    "[<x> <z>" + (!creatingClaim ? "|all <town> [confirm]" : "") + "] [-m]", plugin);
+                "[<x> <z>" + (!creatingClaim ? "|all <town> [confirm]" : "") + "] [-m]", plugin);
             setOperatorCommand(true);
             this.creatingClaim = creatingClaim;
         }
@@ -86,7 +84,7 @@ public final class AdminTownCommand extends Command {
         public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
             final OnlineUser user = (OnlineUser) executor;
             final Chunk chunk = Chunk.at(parseIntArg(args, 0).orElse(user.getChunk().getX()),
-                    parseIntArg(args, 1).orElse(user.getChunk().getZ()));
+                parseIntArg(args, 1).orElse(user.getChunk().getZ()));
             final boolean deleteAllClaims = !creatingClaim && parseStringArg(args, 0).map(arg -> arg.equals("all")).orElse(false);
             final boolean showMap = !deleteAllClaims && parseStringArg(args, 2).map(arg -> arg.equals("-m")).orElse(false);
 
@@ -110,7 +108,7 @@ public final class AdminTownCommand extends Command {
                 // Delete all another town's claims
                 if (!confirmed) {
                     plugin.getLocales().getLocale("delete_all_claims_confirm_other", townName.get())
-                            .ifPresent(user::sendMessage);
+                        .ifPresent(user::sendMessage);
                     return;
                 }
                 plugin.getManager().admin().deleteAllClaims(user, townName.get());
@@ -159,15 +157,15 @@ public final class AdminTownCommand extends Command {
             final OnlineUser user = (OnlineUser) executor;
             plugin.editUserPreferences(user, (preferences -> {
                 final boolean newValue = !(type == Type.IGNORE_CLAIMS ? preferences.isIgnoringClaims()
-                        : preferences.isTownChatSpying());
+                    : preferences.isTownChatSpying());
                 if (type == Type.IGNORE_CLAIMS) {
                     preferences.setIgnoringClaims(newValue);
                 } else {
                     preferences.setTownChatSpying(newValue);
                 }
                 plugin.getLocales().getLocale((type == Type.IGNORE_CLAIMS ?
-                                "ignoring_claims_" : "town_chat_spy_") + (newValue ? "enabled" : "disabled"))
-                        .ifPresent(user::sendMessage);
+                        "ignoring_claims_" : "town_chat_spy_") + (newValue ? "enabled" : "disabled"))
+                    .ifPresent(user::sendMessage);
             }));
         }
 
@@ -200,7 +198,7 @@ public final class AdminTownCommand extends Command {
             final String townName = parseStringArg(args, 0).orElse("");
             if (townName.isBlank()) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(user::sendMessage);
+                    .ifPresent(user::sendMessage);
                 return;
             }
             switch (manageCommandType) {
@@ -217,7 +215,7 @@ public final class AdminTownCommand extends Command {
 
         @Override
         @NotNull
-        public ConcurrentLinkedQueue<Town> getTowns() {
+        public Set<Town> getTowns() {
             return plugin.getTowns();
         }
 
@@ -239,7 +237,7 @@ public final class AdminTownCommand extends Command {
 
         protected SetLevelCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
             super("setlevel", List.of(), parent, String.format("<town> <1-%s>",
-                    plugin.getLevels().getMaxLevel()), plugin);
+                plugin.getLevels().getMaxLevel()), plugin);
             setOperatorCommand(true);
         }
 
@@ -249,14 +247,14 @@ public final class AdminTownCommand extends Command {
             final String townName = parseStringArg(args, 0).orElse("");
             if (townName.isBlank()) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(user::sendMessage);
+                    .ifPresent(user::sendMessage);
                 return;
             }
 
             final Optional<Integer> level = parseIntArg(args, 1);
             if (level.isEmpty() || level.get() < 1 || level.get() > plugin.getLevels().getMaxLevel()) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(user::sendMessage);
+                    .ifPresent(user::sendMessage);
                 return;
             }
             plugin.getManager().admin().setTownLevel(user, townName, level.get());
@@ -264,7 +262,7 @@ public final class AdminTownCommand extends Command {
 
         @NotNull
         @Override
-        public ConcurrentLinkedQueue<Town> getTowns() {
+        public Set<Town> getTowns() {
             return plugin.getTowns();
         }
 
@@ -274,8 +272,8 @@ public final class AdminTownCommand extends Command {
             return (switch (args.length) {
                 case 0, 1 -> TownTabProvider.super.suggest(user, args);
                 case 2 -> IntStream.rangeClosed(1, plugin.getLevels().getMaxLevel())
-                        .mapToObj(Integer::toString)
-                        .toList();
+                    .mapToObj(Integer::toString)
+                    .toList();
                 default -> List.of();
             });
         }
@@ -285,7 +283,7 @@ public final class AdminTownCommand extends Command {
 
         protected ManageBalanceCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
             super("balance", List.of("bal", "setbalance"), parent, String.format("<town> <%s> <amount>",
-                    String.join("|", MoneyOperation.getArguments())), plugin);
+                String.join("|", MoneyOperation.getArguments())), plugin);
             setOperatorCommand(true);
             setConsoleExecutable(true);
         }
@@ -297,7 +295,7 @@ public final class AdminTownCommand extends Command {
             final Optional<Double> amount = parseDoubleArg(args, 2);
             if (townName.isEmpty() || operation.isEmpty() || amount.isEmpty() || amount.get() < 0) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
 
@@ -307,13 +305,13 @@ public final class AdminTownCommand extends Command {
                 plugin.getManager().admin().setTownBalance(executor, townName.get(), BigDecimal.valueOf(amount.get()));
             } else {
                 plugin.getManager().admin().changeTownBalance(executor, townName.get(), action == MoneyOperation.REMOVE
-                        ? BigDecimal.valueOf(amount.get()).negate() : BigDecimal.valueOf(amount.get()));
+                    ? BigDecimal.valueOf(amount.get()).negate() : BigDecimal.valueOf(amount.get()));
             }
         }
 
         @NotNull
         @Override
-        public ConcurrentLinkedQueue<Town> getTowns() {
+        public Set<Town> getTowns() {
             return plugin.getTowns();
         }
 
@@ -334,15 +332,15 @@ public final class AdminTownCommand extends Command {
 
             private static Optional<MoneyOperation> parse(@NotNull String arg) {
                 return Arrays.stream(values())
-                        .filter(operation -> operation.name().equalsIgnoreCase(arg))
-                        .findFirst();
+                    .filter(operation -> operation.name().equalsIgnoreCase(arg))
+                    .findFirst();
             }
 
             @NotNull
             private static List<String> getArguments() {
                 return Arrays.stream(values())
-                        .map(MoneyOperation::name)
-                        .map(String::toLowerCase).toList();
+                    .map(MoneyOperation::name)
+                    .map(String::toLowerCase).toList();
             }
         }
     }
@@ -364,7 +362,7 @@ public final class AdminTownCommand extends Command {
             final Optional<Integer> amount = parseIntArg(args, 4).map(num -> Math.max(0, num));
             if (targetType.isEmpty() || targetName.isEmpty()) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
 
@@ -372,10 +370,10 @@ public final class AdminTownCommand extends Command {
             final String townName;
             if (targetType.get() == TargetType.USER) {
                 final Optional<Town> target = plugin.getDatabase().getUser(targetName.get())
-                        .flatMap(user -> plugin.getUserTown(user.user())).map(Member::town);
+                    .flatMap(user -> plugin.getUserTown(user.user())).map(Member::town);
                 if (target.isEmpty()) {
                     plugin.getLocales().getLocale("error_user_not_found", targetName.get())
-                            .ifPresent(executor::sendMessage);
+                        .ifPresent(executor::sendMessage);
                     return;
                 }
 
@@ -401,7 +399,7 @@ public final class AdminTownCommand extends Command {
 
         @Override
         @NotNull
-        public ConcurrentLinkedQueue<Town> getTowns() {
+        public Set<Town> getTowns() {
             return plugin.getTowns();
         }
 
@@ -413,8 +411,8 @@ public final class AdminTownCommand extends Command {
                 case 2 -> args[0].equalsIgnoreCase("town") ? getTownNames() : List.of();
                 case 3 -> List.of("set", "add", "remove", "clear");
                 case 4 -> Arrays.stream(Town.Bonus.values())
-                        .map(Town.Bonus::name)
-                        .map(String::toLowerCase).toList();
+                    .map(Town.Bonus::name)
+                    .map(String::toLowerCase).toList();
                 default -> List.of();
             };
         }
@@ -425,8 +423,8 @@ public final class AdminTownCommand extends Command {
 
             private static Optional<TargetType> parse(@NotNull String string) {
                 return Arrays.stream(values())
-                        .filter(targetType -> targetType.name().equalsIgnoreCase(string))
-                        .findFirst();
+                    .filter(targetType -> targetType.name().equalsIgnoreCase(string))
+                    .findFirst();
             }
         }
 
@@ -438,8 +436,8 @@ public final class AdminTownCommand extends Command {
 
             private static Optional<Operation> parse(@NotNull String string) {
                 return Arrays.stream(values())
-                        .filter(operation -> operation.name().equalsIgnoreCase(string))
-                        .findFirst();
+                    .filter(operation -> operation.name().equalsIgnoreCase(string))
+                    .findFirst();
             }
         }
     }
@@ -456,7 +454,7 @@ public final class AdminTownCommand extends Command {
             final Optional<String> target = parseStringArg(args, 1);
             if (operation.isEmpty()) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
             switch (operation.get().toLowerCase()) {
@@ -464,13 +462,13 @@ public final class AdminTownCommand extends Command {
                 case "reset" -> {
                     if (target.isEmpty()) {
                         plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                                .ifPresent(executor::sendMessage);
+                            .ifPresent(executor::sendMessage);
                         return;
                     }
                     plugin.getManager().admin().resetAdvancements(executor, target.get());
                 }
                 default -> plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
             }
         }
 
@@ -480,8 +478,8 @@ public final class AdminTownCommand extends Command {
             return switch (args.length) {
                 case 0 -> List.of("list", "reset");
                 case 1 -> plugin.getOnlineUsers().stream()
-                        .map(OnlineUser::getUsername)
-                        .toList();
+                    .map(OnlineUser::getUsername)
+                    .toList();
                 default -> List.of();
             };
         }
@@ -497,33 +495,34 @@ public final class AdminTownCommand extends Command {
 
         @Override
         public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
-            final int days = parseTimeArgAsDays(args, 0).orElse(plugin.getSettings().getPruneInactiveTownDays());
+            final TownSettings.TownPruningSettings settings = plugin.getSettings().getTowns().getPruneInactiveTowns();
+            final int days = parseTimeArgAsDays(args, 0).orElse(settings.getPruneAfterDays());
             if (days <= 0) {
                 plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
 
             final boolean confirm = parseStringArg(args, 1).map("confirm"::equalsIgnoreCase).orElse(false);
             if (!confirm) {
                 plugin.getLocales().getLocale("prune_inactive_towns_confirm", Integer.toString(days))
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
 
             // An actor is needed to prune cross-server, so report an error if nobody is online & cross-server is enabled
             final Optional<? extends OnlineUser> actor = executor instanceof OnlineUser online ? Optional.of(online)
-                    : plugin.getOnlineUsers().stream().findAny();
-            if (actor.isEmpty() && plugin.getSettings().doCrossServer()) {
+                : plugin.getOnlineUsers().stream().findAny();
+            if (actor.isEmpty() && plugin.getSettings().getCrossServer().isEnabled()) {
                 plugin.getLocales().getLocale("error_command_in_game_only")
-                        .ifPresent(executor::sendMessage);
+                    .ifPresent(executor::sendMessage);
                 return;
             }
 
             final long pruned = plugin.pruneInactiveTowns(days, actor.orElse(null));
             plugin.getLocales().getLocale("prune_inactive_towns_success",
-                            Long.toString(pruned), Integer.toString(days))
-                    .ifPresent(executor::sendMessage);
+                    Long.toString(pruned), Integer.toString(days))
+                .ifPresent(executor::sendMessage);
         }
 
     }

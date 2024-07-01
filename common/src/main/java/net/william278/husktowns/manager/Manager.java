@@ -25,6 +25,7 @@ import net.william278.husktowns.claim.Chunk;
 import net.william278.husktowns.claim.ClaimWorld;
 import net.william278.husktowns.claim.TownClaim;
 import net.william278.husktowns.claim.World;
+import net.william278.husktowns.config.Settings;
 import net.william278.husktowns.network.Message;
 import net.william278.husktowns.network.Payload;
 import net.william278.husktowns.town.Member;
@@ -45,6 +46,7 @@ import java.util.function.Function;
 public class Manager {
 
     private final HuskTowns plugin;
+
     private final TownsManager towns;
     private final ClaimsManager claims;
     private final AdminManager admin;
@@ -55,8 +57,8 @@ public class Manager {
         this.towns = new TownsManager(plugin);
         this.claims = new ClaimsManager(plugin);
         this.admin = new AdminManager(plugin);
-        this.wars = plugin.getSettings().doTownRelations() && plugin.getSettings().doTownWars()
-                ? new WarManager(plugin) : null;
+        final Settings.TownSettings.RelationsSettings settings = plugin.getSettings().getTowns().getRelations();
+        this.wars = settings.isEnabled() && settings.getWars().isEnabled() ? new WarManager(plugin) : null;
     }
 
     @NotNull
@@ -130,7 +132,7 @@ public class Manager {
                     plugin.checkAdvancements(mayor.town(), user);
                 });
             }
-        })));
+        }, user)));
     }
 
     /**
@@ -144,13 +146,13 @@ public class Manager {
         final Optional<Member> member = plugin.getUserTown(user);
         if (member.isEmpty()) {
             plugin.getLocales().getLocale("error_not_in_town")
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
         if (privilege != null && !member.get().hasPrivilege(plugin, privilege)) {
             plugin.getLocales().getLocale("error_insufficient_privileges", member.get().town().getName())
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
@@ -177,13 +179,13 @@ public class Manager {
         final Optional<Member> member = plugin.getUserTown(user);
         if (member.isEmpty()) {
             plugin.getLocales().getLocale("error_not_in_town")
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
         if (!member.get().role().equals(plugin.getRoles().getMayorRole())) {
             plugin.getLocales().getLocale("error_not_town_mayor", member.get().town().getName())
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
@@ -204,7 +206,7 @@ public class Manager {
         final Optional<TownClaim> existingClaim = plugin.getClaimAt(chunk, world);
         if (existingClaim.isEmpty()) {
             plugin.getLocales().getLocale("error_chunk_not_claimed")
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
@@ -212,14 +214,14 @@ public class Manager {
         final Optional<ClaimWorld> claimWorld = plugin.getClaimWorld(world);
         if (claimWorld.isEmpty()) {
             plugin.getLocales().getLocale("error_world_not_claimable")
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
         final Town town = member.town();
         if (!claim.town().equals(town)) {
             plugin.getLocales().getLocale("error_chunk_claimed_by", claim.town().getName())
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
             return;
         }
 
@@ -241,11 +243,11 @@ public class Manager {
 
         // Propagate to other servers
         plugin.getMessageBroker().ifPresent(broker -> Message.builder()
-                .type(Message.Type.TOWN_UPDATE)
-                .payload(Payload.integer(town.getId()))
-                .target(Message.TARGET_ALL, Message.TargetType.SERVER)
-                .build()
-                .send(broker, actor));
+            .type(Message.Type.TOWN_UPDATE)
+            .payload(Payload.integer(town.getId()))
+            .target(Message.TARGET_ALL, Message.TargetType.SERVER)
+            .build()
+            .send(broker, actor));
     }
 
     /**
@@ -256,10 +258,10 @@ public class Manager {
      */
     public void sendTownMessage(@NotNull Town town, @NotNull Component message) {
         plugin.getOnlineUsers().stream()
-                .filter(user -> town.getMembers().containsKey(user.getUuid()))
-                .filter(user -> plugin.getUserPreferences(user.getUuid())
-                        .map(Preferences::sendTownMessages).orElse(true))
-                .forEach(user -> user.sendMessage(message));
+            .filter(user -> town.getMembers().containsKey(user.getUuid()))
+            .filter(user -> plugin.getUserPreferences(user.getUuid())
+                .map(Preferences::sendTownMessages).orElse(true))
+            .forEach(user -> user.sendMessage(message));
     }
 
 }

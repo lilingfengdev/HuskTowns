@@ -20,13 +20,14 @@
 package net.william278.husktowns.claim;
 
 import com.google.gson.annotations.Expose;
+import net.william278.cloplib.operation.OperationPosition;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * Represents a position in a claim world
  */
 @SuppressWarnings("unused")
-public class Position {
+public class Position implements OperationPosition {
 
     @Expose
     private double x;
@@ -125,12 +126,12 @@ public class Position {
     @NotNull
     public Position interpolate(@NotNull Position next, double scalar) {
         return Position.at(
-                x + (next.x - x) * scalar,
-                y + (next.y - y) * scalar,
-                z + (next.z - z) * scalar,
-                world,
-                (float) (yaw + (next.yaw - yaw) * scalar),
-                (float) (pitch + (next.pitch - pitch) * scalar)
+            x + (next.x - x) * scalar,
+            y + (next.y - y) * scalar,
+            z + (next.z - z) * scalar,
+            world,
+            (float) (yaw + (next.yaw - yaw) * scalar),
+            (float) (pitch + (next.pitch - pitch) * scalar)
         );
     }
 
@@ -155,8 +156,8 @@ public class Position {
     @NotNull
     public String toString() {
         return String.format(
-                "(x: %s, y: %s, z: %s, world: %s, yaw: %s, pitch: %s)",
-                x, y, z, world.getName(), yaw, pitch
+            "(x: %s, y: %s, z: %s, world: %s, yaw: %s, pitch: %s)",
+            x, y, z, world.getName(), yaw, pitch
         );
     }
 }

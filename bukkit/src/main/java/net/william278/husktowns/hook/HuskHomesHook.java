@@ -19,6 +19,8 @@
 
 package net.william278.husktowns.hook;
 
+import net.william278.cloplib.operation.Operation;
+import net.william278.cloplib.operation.OperationType;
 import net.william278.huskhomes.api.HuskHomesAPI;
 import net.william278.huskhomes.event.HomeCreateEvent;
 import net.william278.huskhomes.event.HomeEditEvent;
@@ -28,7 +30,6 @@ import net.william278.husktowns.BukkitHuskTowns;
 import net.william278.husktowns.HuskTowns;
 import net.william278.husktowns.claim.Position;
 import net.william278.husktowns.claim.World;
-import net.william278.husktowns.listener.Operation;
 import net.william278.husktowns.user.BukkitUser;
 import net.william278.husktowns.user.OnlineUser;
 import org.bukkit.Bukkit;
@@ -44,8 +45,9 @@ public class HuskHomesHook extends TeleportationHook implements Listener {
     @Nullable
     private HuskHomesAPI api;
 
+    @PluginHook(id = "HuskHomes", register = PluginHook.Register.ON_ENABLE, platform = "bukkit")
     public HuskHomesHook(@NotNull HuskTowns plugin) {
-        super(plugin, "HuskHomes");
+        super(plugin);
     }
 
     @Override
@@ -60,18 +62,18 @@ public class HuskHomesHook extends TeleportationHook implements Listener {
                          boolean instant) {
         try {
             final HuskHomesAPI api = getHuskHomes()
-                    .orElseThrow(() -> new IllegalStateException("HuskHomes API not present"));
+                .orElseThrow(() -> new IllegalStateException("HuskHomes API not present"));
             final TeleportBuilder builder = api
-                    .teleportBuilder(api.adaptUser(((BukkitUser) user).getPlayer()))
-                    .target(net.william278.huskhomes.position.Position.at(
-                            position.getX(),
-                            position.getY(),
-                            position.getZ(),
-                            position.getYaw(),
-                            position.getPitch(),
-                            net.william278.huskhomes.position.World.from(position.getWorld().getName(), position.getWorld().getUuid()),
-                            server
-                    ));
+                .teleportBuilder(api.adaptUser(((BukkitUser) user).getPlayer()))
+                .target(net.william278.huskhomes.position.Position.at(
+                    position.getX(),
+                    position.getY(),
+                    position.getZ(),
+                    position.getYaw(),
+                    position.getPitch(),
+                    net.william278.huskhomes.position.World.from(position.getWorld().getName(), position.getWorld().getUuid()),
+                    server
+                ));
             if (instant) {
                 builder.toTeleport().execute();
             } else {
@@ -79,7 +81,7 @@ public class HuskHomesHook extends TeleportationHook implements Listener {
             }
         } catch (IllegalStateException e) {
             plugin.getLocales().getLocale("error_town_spawn_not_set")
-                    .ifPresent(user::sendMessage);
+                .ifPresent(user::sendMessage);
         }
     }
 
@@ -99,19 +101,19 @@ public class HuskHomesHook extends TeleportationHook implements Listener {
 
     private boolean cancelEvent(@NotNull CommandUser creator, @NotNull net.william278.huskhomes.position.Position home) {
         final Optional<? extends OnlineUser> user = creator instanceof net.william278.huskhomes.user.OnlineUser online ?
-                plugin.getOnlineUsers().stream().filter(u -> u.getUuid().equals(online.getUuid())).findFirst() :
-                Optional.empty();
+            plugin.getOnlineUsers().stream().filter(u -> u.getUuid().equals(online.getUuid())).findFirst() :
+            Optional.empty();
         if (user.isEmpty()) {
             return false;
         }
 
         final net.william278.huskhomes.position.World world = home.getWorld();
         final Position position = Position.at(home.getX(), home.getY(), home.getZ(),
-                World.of(world.getUuid(), world.getName(), world.getEnvironment().name()),
-                home.getYaw(), home.getPitch());
+            World.of(world.getUuid(), world.getName(), world.getEnvironment().name()),
+            home.getYaw(), home.getPitch());
 
-        return plugin.getOperationHandler().cancelOperation(Operation
-                .of(user.get(), Operation.Type.BLOCK_INTERACT, position));
+        return plugin.cancelOperation(Operation
+            .of(user.get(), OperationType.BLOCK_INTERACT, position));
     }
 
     private Optional<HuskHomesAPI> getHuskHomes() {

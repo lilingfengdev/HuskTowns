@@ -19,12 +19,15 @@
 
 package net.william278.husktowns.database;
 
+import com.google.common.collect.Maps;
+import com.google.common.collect.Queues;
 import com.google.gson.JsonSyntaxException;
 import com.zaxxer.hikari.HikariDataSource;
 import net.william278.husktowns.HuskTowns;
 import net.william278.husktowns.claim.ClaimWorld;
 import net.william278.husktowns.claim.ServerWorld;
 import net.william278.husktowns.claim.World;
+import net.william278.husktowns.config.Settings;
 import net.william278.husktowns.town.Town;
 import net.william278.husktowns.user.Preferences;
 import net.william278.husktowns.user.SavedUser;
@@ -47,10 +50,10 @@ public final class MySqlDatabase extends Database {
 
     public MySqlDatabase(@NotNull HuskTowns plugin) {
         super(plugin);
-        this.flavor = plugin.getSettings().getDatabaseType() == Type.MARIADB
-                ? "mariadb" : "mysql";
-        this.driverClass = plugin.getSettings().getDatabaseType() == Type.MARIADB
-                ? "org.mariadb.jdbc.Driver" : "com.mysql.cj.jdbc.Driver";
+        this.flavor = plugin.getSettings().getDatabase().getType() == Type.MARIADB
+            ? "mariadb" : "mysql";
+        this.driverClass = plugin.getSettings().getDatabase().getType() == Type.MARIADB
+            ? "org.mariadb.jdbc.Driver" : "com.mysql.cj.jdbc.Driver";
     }
 
     private Connection getConnection() throws SQLException {
@@ -59,45 +62,49 @@ public final class MySqlDatabase extends Database {
 
     private void setConnection() {
         // Initialize the Hikari pooled connection
+        final Settings.DatabaseSettings databaseSettings = plugin.getSettings().getDatabase();
+        final Settings.DatabaseSettings.DatabaseCredentials credentials = databaseSettings.getCredentials();
+
         dataSource = new HikariDataSource();
         dataSource.setDriverClassName(driverClass);
         dataSource.setJdbcUrl(String.format("jdbc:%s://%s:%s/%s%s",
-                flavor,
-                plugin.getSettings().getMySqlHost(),
-                plugin.getSettings().getMySqlPort(),
-                plugin.getSettings().getMySqlDatabase(),
-                plugin.getSettings().getMySqlConnectionParameters()
+            flavor,
+            credentials.getHost(),
+            credentials.getPort(),
+            credentials.getDatabase(),
+            credentials.getParameters()
         ));
 
         // Authenticate with the database
-        dataSource.setUsername(plugin.getSettings().getMySqlUsername());
-        dataSource.setPassword(plugin.getSettings().getMySqlPassword());
+        dataSource.setUsername(credentials.getUsername());
+        dataSource.setPassword(credentials.getPassword());
 
         // Set connection pool options
-        dataSource.setMaximumPoolSize(plugin.getSettings().getMySqlConnectionPoolSize());
-        dataSource.setMinimumIdle(plugin.getSettings().getMySqlConnectionPoolIdle());
-        dataSource.setMaxLifetime(plugin.getSettings().getMySqlConnectionPoolLifetime());
-        dataSource.setKeepaliveTime(plugin.getSettings().getMySqlConnectionPoolKeepAlive());
-        dataSource.setConnectionTimeout(plugin.getSettings().getMySqlConnectionPoolTimeout());
+        final Settings.DatabaseSettings.PoolOptions poolOptions = databaseSettings.getConnectionPool();
+        dataSource.setMaximumPoolSize(poolOptions.getSize());
+        dataSource.setMinimumIdle(poolOptions.getIdle());
+        dataSource.setMaxLifetime(poolOptions.getLifetime());
+        dataSource.setKeepaliveTime(poolOptions.getKeepalive());
+        dataSource.setConnectionTimeout(poolOptions.getTimeout());
         dataSource.setPoolName(DATA_POOL_NAME);
 
         // Set additional connection pool properties
         final Properties properties = new Properties();
         properties.putAll(
-                Map.of("cachePrepStmts", "true",
-                        "prepStmtCacheSize", "250",
-                        "prepStmtCacheSqlLimit", "2048",
-                        "useServerPrepStmts", "true",
-                        "useLocalSessionState", "true",
-                        "useLocalTransactionState", "true"
-                ));
+            Map.of("cachePrepStmts", "true",
+                "prepStmtCacheSize", "250",
+                "prepStmtCacheSqlLimit", "2048",
+                "useServerPrepStmts", "true",
+                "useLocalSessionState", "true",
+                "useLocalTransactionState", "true"
+            ));
         properties.putAll(
-                Map.of(
-                        "rewriteBatchedStatements", "true",
-                        "cacheResultSetMetadata", "true",
-                        "cacheServerConfiguration", "true",
-                        "elideSetAutoCommits", "true",
-                        "maintainTimeStats", "false")
+            Map.of(
+                "rewriteBatchedStatements", "true",
+                "cacheResultSetMetadata", "true",
+                "cacheServerConfiguration", "true",
+                "elideSetAutoCommits", "true",
+                "maintainTimeStats", "false")
         );
         dataSource.setDataSourceProperties(properties);
     }
@@ -117,13 +124,13 @@ public final class MySqlDatabase extends Database {
         this.setConnection();
 
         // Create tables
-        final Database.Type type = plugin.getSettings().getDatabaseType();
+        final Database.Type type = plugin.getSettings().getDatabase().getType();
         if (!isCreated()) {
             plugin.log(Level.INFO, String.format("Creating %s database tables", type.getDisplayName()));
             try (Connection connection = getConnection()) {
                 executeScript(connection, String.format("%s_schema.sql", flavor));
             } catch (SQLException e) {
-                plugin.log(Level.SEVERE, String.format("Failed to create %s database tables", type.getDisplayName()));
+                plugin.log(Level.SEVERE, String.format("Failed to create %s database tables", type.getDisplayName()), e);
                 setLoaded(false);
                 return;
             }
@@ -138,7 +145,7 @@ public final class MySqlDatabase extends Database {
             performMigrations(getConnection(), type);
             setLoaded(true);
         } catch (SQLException e) {
-            plugin.log(Level.SEVERE, String.format("Failed to perform %s database migrations", type.getDisplayName()));
+            plugin.log(Level.SEVERE, String.format("Failed to perform %s database migrations", type.getDisplayName()), e);
             setLoaded(false);
         }
     }
@@ -148,9 +155,9 @@ public final class MySqlDatabase extends Database {
     public boolean isCreated() {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `uuid`
-                    FROM `%user_data%`
-                    LIMIT 1;"""))) {
+                SELECT `uuid`
+                FROM `%user_data%`
+                LIMIT 1;"""))) {
                 statement.executeQuery();
                 return true;
             }
@@ -163,9 +170,9 @@ public final class MySqlDatabase extends Database {
     public int getSchemaVersion() {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `schema_version`
-                    FROM `%meta_data%`
-                    LIMIT 1;"""))) {
+                SELECT `schema_version`
+                FROM `%meta_data%`
+                LIMIT 1;"""))) {
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
                     return resultSet.getInt("schema_version");
@@ -182,8 +189,8 @@ public final class MySqlDatabase extends Database {
         if (getSchemaVersion() == -1) {
             try (Connection connection = getConnection()) {
                 try (PreparedStatement insertStatement = connection.prepareStatement(format("""
-                        INSERT INTO `%meta_data%` (`schema_version`)
-                        VALUES (?)"""))) {
+                    INSERT INTO `%meta_data%` (`schema_version`)
+                    VALUES (?)"""))) {
                     insertStatement.setInt(1, version);
                     insertStatement.executeUpdate();
                 }
@@ -195,8 +202,8 @@ public final class MySqlDatabase extends Database {
 
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    UPDATE `%meta_data%`
-                    SET `schema_version` = ?;"""))) {
+                UPDATE `%meta_data%`
+                SET `schema_version` = ?;"""))) {
                 statement.setInt(1, version);
                 statement.executeUpdate();
             }
@@ -209,19 +216,19 @@ public final class MySqlDatabase extends Database {
     public Optional<SavedUser> getUser(@NotNull UUID uuid) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `uuid`, `username`, `last_login`, `preferences`
-                    FROM `%user_data%`
-                    WHERE uuid = ?"""))) {
+                SELECT `uuid`, `username`, `last_login`, `preferences`
+                FROM `%user_data%`
+                WHERE uuid = ?"""))) {
                 statement.setString(1, uuid.toString());
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
                     final String name = resultSet.getString("username");
                     final String preferences = new String(resultSet.getBytes("preferences"), StandardCharsets.UTF_8);
                     return Optional.of(new SavedUser(
-                            User.of(uuid, name),
-                            resultSet.getTimestamp("last_login").toLocalDateTime()
-                                    .atOffset(OffsetDateTime.now().getOffset()),
-                            plugin.getPreferencesFromJson(preferences)
+                        User.of(uuid, name),
+                        resultSet.getTimestamp("last_login").toLocalDateTime()
+                            .atOffset(OffsetDateTime.now().getOffset()),
+                        plugin.getPreferencesFromJson(preferences)
                     ));
                 }
             }
@@ -235,9 +242,9 @@ public final class MySqlDatabase extends Database {
     public Optional<SavedUser> getUser(@NotNull String username) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `uuid`, `username`, `last_login`, `preferences`
-                    FROM `%user_data%`
-                    WHERE `username` = ?"""))) {
+                SELECT `uuid`, `username`, `last_login`, `preferences`
+                FROM `%user_data%`
+                WHERE `username` = ?"""))) {
                 statement.setString(1, username);
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
@@ -245,10 +252,10 @@ public final class MySqlDatabase extends Database {
                     final String name = resultSet.getString("username");
                     final String preferences = new String(resultSet.getBytes("preferences"), StandardCharsets.UTF_8);
                     return Optional.of(new SavedUser(
-                            User.of(uuid, name),
-                            resultSet.getTimestamp("last_login").toLocalDateTime()
-                                    .atOffset(OffsetDateTime.now().getOffset()),
-                            plugin.getPreferencesFromJson(preferences)
+                        User.of(uuid, name),
+                        resultSet.getTimestamp("last_login").toLocalDateTime()
+                            .atOffset(OffsetDateTime.now().getOffset()),
+                        plugin.getPreferencesFromJson(preferences)
                     ));
                 }
             }
@@ -263,9 +270,9 @@ public final class MySqlDatabase extends Database {
         final List<SavedUser> inactiveUsers = new ArrayList<>();
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `uuid`, `username`, `last_login`, `preferences`
-                    FROM `%user_data%`
-                    WHERE `last_login` < DATE_SUB(NOW(), INTERVAL ? DAY);"""))) {
+                SELECT `uuid`, `username`, `last_login`, `preferences`
+                FROM `%user_data%`
+                WHERE `last_login` < DATE_SUB(NOW(), INTERVAL ? DAY);"""))) {
                 statement.setLong(1, daysInactive);
                 final ResultSet resultSet = statement.executeQuery();
                 while (resultSet.next()) {
@@ -273,10 +280,10 @@ public final class MySqlDatabase extends Database {
                     final String name = resultSet.getString("username");
                     final String preferences = new String(resultSet.getBytes("preferences"), StandardCharsets.UTF_8);
                     inactiveUsers.add(new SavedUser(
-                            User.of(uuid, name),
-                            resultSet.getTimestamp("last_login").toLocalDateTime()
-                                    .atOffset(OffsetDateTime.now().getOffset()),
-                            plugin.getPreferencesFromJson(preferences)
+                        User.of(uuid, name),
+                        resultSet.getTimestamp("last_login").toLocalDateTime()
+                            .atOffset(OffsetDateTime.now().getOffset()),
+                        plugin.getPreferencesFromJson(preferences)
                     ));
                 }
             }
@@ -291,8 +298,8 @@ public final class MySqlDatabase extends Database {
     public void createUser(@NotNull User user, @NotNull Preferences preferences) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    INSERT INTO `%user_data%` (`uuid`, `username`, `last_login`, `preferences`)
-                    VALUES (?, ?, ?, ?)"""))) {
+                INSERT INTO `%user_data%` (`uuid`, `username`, `last_login`, `preferences`)
+                VALUES (?, ?, ?, ?)"""))) {
                 statement.setString(1, user.getUuid().toString());
                 statement.setString(2, user.getUsername());
                 statement.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now()));
@@ -308,9 +315,9 @@ public final class MySqlDatabase extends Database {
     public void updateUser(@NotNull User user, @NotNull OffsetDateTime lastLogin, @NotNull Preferences preferences) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    UPDATE `%user_data%`
-                    SET `username` = ?, `last_login` = ?, `preferences` = ?
-                    WHERE `uuid` = ?"""))) {
+                UPDATE `%user_data%`
+                SET `username` = ?, `last_login` = ?, `preferences` = ?
+                WHERE `uuid` = ?"""))) {
                 statement.setString(1, user.getUsername());
                 statement.setTimestamp(2, Timestamp.valueOf(lastLogin.toLocalDateTime()));
                 statement.setBytes(3, plugin.getGson().toJson(preferences).getBytes(StandardCharsets.UTF_8));
@@ -326,7 +333,7 @@ public final class MySqlDatabase extends Database {
     public void deleteAllUsers() {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    DELETE FROM `%user_data%`"""))) {
+                DELETE FROM `%user_data%`"""))) {
                 statement.executeUpdate();
             }
         } catch (SQLException e) {
@@ -338,9 +345,9 @@ public final class MySqlDatabase extends Database {
     public Optional<Town> getTown(int townId) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `id`, `data`
-                    FROM `%town_data%`
-                    WHERE `id` = ?"""))) {
+                SELECT `id`, `data`
+                FROM `%town_data%`
+                WHERE `id` = ?"""))) {
                 statement.setInt(1, townId);
                 final ResultSet resultSet = statement.executeQuery();
                 if (resultSet.next()) {
@@ -361,20 +368,19 @@ public final class MySqlDatabase extends Database {
         final List<Town> towns = new ArrayList<>();
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `id`, `data`
-                    FROM `%town_data%`"""))) {
+                SELECT `id`, `data`
+                FROM `%town_data%`"""))) {
                 final ResultSet resultSet = statement.executeQuery();
                 while (resultSet.next()) {
-                    final String data = new String(resultSet.getBytes("data"), StandardCharsets.UTF_8);
-                    final Town town = plugin.getTownFromJson(data);
-                    if (town != null) {
-                        town.setId(resultSet.getInt("id"));
-                        towns.add(town);
-                    }
+                    final Town town = plugin.getTownFromJson(
+                        new String(resultSet.getBytes("data"), StandardCharsets.UTF_8)
+                    );
+                    town.setId(resultSet.getInt("id"));
+                    towns.add(town);
                 }
             }
         } catch (SQLException | JsonSyntaxException e) {
-            plugin.log(Level.SEVERE, "Failed to fetch all town data from table", e);
+            throw new IllegalStateException("Failed to fetch all town data from table", e);
         }
         return towns;
     }
@@ -383,11 +389,10 @@ public final class MySqlDatabase extends Database {
     @NotNull
     public Town createTown(@NotNull String name, @NotNull User creator) {
         final Town town = Town.create(name, creator, plugin);
-        town.addMember(creator.getUuid(), plugin.getRoles().getMayorRole());
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    INSERT INTO `%town_data%` (`name`, `data`)
-                    VALUES (?, ?)"""), Statement.RETURN_GENERATED_KEYS)) {
+                INSERT INTO `%town_data%` (`name`, `data`)
+                VALUES (?, ?)"""), Statement.RETURN_GENERATED_KEYS)) {
                 statement.setString(1, town.getName());
                 statement.setBytes(2, plugin.getGson().toJson(town).getBytes(StandardCharsets.UTF_8));
                 statement.executeUpdate();
@@ -407,9 +412,9 @@ public final class MySqlDatabase extends Database {
     public void updateTown(@NotNull Town town) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    UPDATE `%town_data%`
-                    SET `name` = ?, `data` = ?
-                    WHERE `id` = ?"""))) {
+                UPDATE `%town_data%`
+                SET `name` = ?, `data` = ?
+                WHERE `id` = ?"""))) {
                 statement.setString(1, town.getName());
                 statement.setBytes(2, plugin.getGson().toJson(town).getBytes(StandardCharsets.UTF_8));
                 statement.setInt(3, town.getId());
@@ -424,8 +429,8 @@ public final class MySqlDatabase extends Database {
     public void deleteTown(int townId) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    DELETE FROM `%town_data%`
-                    WHERE `id` = ?"""))) {
+                DELETE FROM `%town_data%`
+                WHERE `id` = ?"""))) {
                 statement.setInt(1, townId);
                 statement.executeUpdate();
             }
@@ -438,7 +443,7 @@ public final class MySqlDatabase extends Database {
     public void deleteAllTowns() {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    DELETE FROM `%town_data%`"""))) {
+                DELETE FROM `%town_data%`"""))) {
                 statement.executeUpdate();
             }
         } catch (SQLException e) {
@@ -451,19 +456,19 @@ public final class MySqlDatabase extends Database {
         final Map<World, ClaimWorld> worlds = new HashMap<>();
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `id`, `world_uuid`, `world_name`, `world_environment`, `claims`
-                    FROM `%claim_data%`
-                    WHERE `server_name` = ?"""))) {
+                SELECT `id`, `world_uuid`, `world_name`, `world_environment`, `claims`
+                FROM `%claim_data%`
+                WHERE `server_name` = ?"""))) {
                 statement.setString(1, server);
                 final ResultSet resultSet = statement.executeQuery();
                 while (resultSet.next()) {
                     final String data = new String(resultSet.getBytes("claims"), StandardCharsets.UTF_8);
                     final World world = World.of(UUID.fromString(resultSet.getString("world_uuid")),
-                            resultSet.getString("world_name"),
-                            resultSet.getString("world_environment"));
+                        resultSet.getString("world_name"),
+                        resultSet.getString("world_environment"));
                     final ClaimWorld claimWorld = plugin.getClaimWorldFromJson(data);
                     claimWorld.updateId(resultSet.getInt("id"));
-                    if (!plugin.getSettings().isUnclaimableWorld(world)) {
+                    if (!plugin.getSettings().getGeneral().isUnclaimableWorld(world)) {
                         worlds.put(world, claimWorld);
                     }
                 }
@@ -479,14 +484,14 @@ public final class MySqlDatabase extends Database {
         final Map<ServerWorld, ClaimWorld> worlds = new HashMap<>();
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    SELECT `id`, `server_name`, `world_uuid`, `world_name`, `world_environment`, `claims`
-                    FROM `%claim_data%`"""))) {
+                SELECT `id`, `server_name`, `world_uuid`, `world_name`, `world_environment`, `claims`
+                FROM `%claim_data%`"""))) {
                 final ResultSet resultSet = statement.executeQuery();
                 while (resultSet.next()) {
                     final String data = new String(resultSet.getBytes("claims"), StandardCharsets.UTF_8);
                     final World world = World.of(UUID.fromString(resultSet.getString("world_uuid")),
-                            resultSet.getString("world_name"),
-                            resultSet.getString("world_environment"));
+                        resultSet.getString("world_name"),
+                        resultSet.getString("world_environment"));
                     final ClaimWorld claimWorld = plugin.getClaimWorldFromJson(data);
                     claimWorld.updateId(resultSet.getInt("id"));
                     worlds.put(new ServerWorld(resultSet.getString("server_name"), world), claimWorld);
@@ -501,11 +506,11 @@ public final class MySqlDatabase extends Database {
     @Override
     @NotNull
     public ClaimWorld createClaimWorld(@NotNull World world) {
-        final ClaimWorld claimWorld = ClaimWorld.of(0, new HashMap<>(), new ArrayList<>());
+        final ClaimWorld claimWorld = ClaimWorld.of(0, Maps.newConcurrentMap(), Queues.newConcurrentLinkedQueue());
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    INSERT INTO `%claim_data%` (`world_uuid`, `world_name`, `world_environment`, `server_name`, `claims`)
-                    VALUES (?, ?, ?, ?, ?)"""), Statement.RETURN_GENERATED_KEYS)) {
+                INSERT INTO `%claim_data%` (`world_uuid`, `world_name`, `world_environment`, `server_name`, `claims`)
+                VALUES (?, ?, ?, ?, ?)"""), Statement.RETURN_GENERATED_KEYS)) {
                 statement.setString(1, world.getUuid().toString());
                 statement.setString(2, world.getName());
                 statement.setString(3, world.getEnvironment());
@@ -528,9 +533,9 @@ public final class MySqlDatabase extends Database {
     public void updateClaimWorld(@NotNull ClaimWorld claimWorld) {
         try (Connection connection = getConnection()) {
             try (PreparedStatement statement = connection.prepareStatement(format("""
-                    UPDATE `%claim_data%`
-                    SET `claims` = ?
-                    WHERE `id` = ?"""))) {
+                UPDATE `%claim_data%`
+                SET `claims` = ?
+                WHERE `id` = ?"""))) {
                 statement.setBytes(1, plugin.getGson().toJson(claimWorld).getBytes(StandardCharsets.UTF_8));
                 statement.setInt(2, claimWorld.getId());
                 statement.executeUpdate();

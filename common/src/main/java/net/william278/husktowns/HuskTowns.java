@@ -22,25 +22,25 @@ package net.william278.husktowns;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.platform.AudienceProvider;
-import net.william278.annotaml.Annotaml;
 import net.william278.desertwell.util.UpdateChecker;
 import net.william278.desertwell.util.Version;
-import net.william278.husktowns.advancement.AdvancementTracker;
+import net.william278.husktowns.advancement.AdvancementProvider;
 import net.william278.husktowns.claim.*;
 import net.william278.husktowns.command.AdminTownCommand;
 import net.william278.husktowns.command.Command;
 import net.william278.husktowns.command.HuskTownsCommand;
 import net.william278.husktowns.command.TownCommand;
-import net.william278.husktowns.config.*;
+import net.william278.husktowns.config.ConfigProvider;
 import net.william278.husktowns.database.Database;
 import net.william278.husktowns.database.MySqlDatabase;
 import net.william278.husktowns.database.SqLiteDatabase;
 import net.william278.husktowns.events.EventDispatcher;
 import net.william278.husktowns.hook.EconomyHook;
-import net.william278.husktowns.hook.Hook;
+import net.william278.husktowns.hook.HookManager;
 import net.william278.husktowns.hook.MapHook;
 import net.william278.husktowns.hook.TeleportationHook;
 import net.william278.husktowns.listener.OperationHandler;
+import net.william278.husktowns.listener.UserListener;
 import net.william278.husktowns.manager.Manager;
 import net.william278.husktowns.network.Broker;
 import net.william278.husktowns.network.PluginMessageBroker;
@@ -59,58 +59,20 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
-public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserList, AdvancementTracker,
-        DataPruner, GsonProvider {
+public interface HuskTowns extends Task.Supplier, ConfigProvider, EventDispatcher, UserListProvider,
+    AdvancementProvider, DataPruner, GsonProvider, OperationHandler, UserListener {
 
     int SPIGOT_RESOURCE_ID = 92672;
     int BSTATS_PLUGIN_ID = 11265;
-
-    @NotNull
-    Settings getSettings();
-
-    void setSettings(@NotNull Settings settings);
-
-    @NotNull
-    Locales getLocales();
-
-    void setLocales(@NotNull Locales locales);
-
-    @NotNull
-    Roles getRoles();
-
-    void setRoles(@NotNull Roles roles);
-
-    @NotNull
-    Presets getRulePresets();
-
-    void setRulePresets(@NotNull Presets presets);
-
-    @NotNull
-    Flags getFlags();
-
-    void setFlags(@NotNull Flags flags);
-
-    @NotNull
-    Levels getLevels();
-
-    void setLevels(@NotNull Levels levels);
-
-    @NotNull
-    String getServerName();
-
-    void setServer(Server server);
 
     @NotNull
     Database getDatabase();
@@ -125,15 +87,10 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
     Validator getValidator();
 
     @NotNull
-    OperationHandler getOperationHandler();
-
-    @NotNull
-    SpecialTypes getSpecialTypes();
-
-    void setSpecialTypes(@NotNull SpecialTypes specialTypes);
-
-    @NotNull
     Map<UUID, Deque<Invite>> getInvites();
+
+    @NotNull
+    HookManager getHookManager();
 
     default void addInvite(@NotNull UUID recipient, @NotNull Invite invite) {
         if (!getInvites().containsKey(recipient)) {
@@ -159,8 +116,8 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
             }
             if (selectedInviter != null) {
                 invites = invites.stream()
-                        .filter(invite -> invite.getSender().getUsername().equalsIgnoreCase(selectedInviter))
-                        .collect(Collectors.toCollection(ArrayDeque::new));
+                    .filter(invite -> invite.getSender().getUsername().equalsIgnoreCase(selectedInviter))
+                    .collect(Collectors.toCollection(ArrayDeque::new));
             }
             return Optional.of(invites.getLast());
 
@@ -192,13 +149,12 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
         });
     }
 
-    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     boolean isLoaded();
 
     void setLoaded(boolean loaded);
 
     @NotNull
-    ConcurrentLinkedQueue<Town> getTowns();
+    Set<Town> getTowns();
 
     default void removeTown(@NotNull Town town) {
         getTowns().removeIf(t -> t.getId() == town.getId());
@@ -211,13 +167,13 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
 
     default Optional<Member> getUserTown(@NotNull User user) throws IllegalStateException {
         return getTowns().stream()
-                .filter(town -> town.getMembers().containsKey(user.getUuid())).findFirst()
-                .flatMap(town -> {
-                    final int weight = town.getMembers().get(user.getUuid());
-                    return Optional.of(getRoles().fromWeight(weight)
-                            .map(role -> new Member(user, town, role))
-                            .orElseThrow(() -> new IllegalStateException("No role found for weight \"" + weight + "\"")));
-                });
+            .filter(town -> town.getMembers().containsKey(user.getUuid())).findFirst()
+            .flatMap(town -> {
+                final int weight = town.getMembers().get(user.getUuid());
+                return Optional.of(getRoles().fromWeight(weight)
+                    .map(role -> new Member(user, town, role))
+                    .orElseThrow(() -> new IllegalStateException("No role found for weight \"" + weight + "\"")));
+            });
     }
 
     @NotNull
@@ -238,25 +194,24 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
                 pruneOrphanClaims();
                 pruneLocalTownWars();
                 log(Level.INFO, String.format("Loaded data in %s seconds.",
-                        (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d)));
+                    (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d)));
                 setLoaded(true);
-                loadHooks();
             } catch (IllegalStateException e) {
                 setLoaded(false);
                 log(Level.SEVERE, String.format("Failed to load data (after %s seconds). Interaction will be disabled!",
-                        (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d)), e);
+                    (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d)), e);
             }
         });
     }
 
     default void loadClaimWorlds() throws IllegalStateException {
-        log(Level.INFO, "Loading claims from the " + getSettings().getDatabaseType().getDisplayName() + " database...");
+        log(Level.INFO, "Loading claims from the " + getSettings().getDatabase().getType().getDisplayName() + " database...");
         LocalTime startTime = LocalTime.now();
         final Map<String, ClaimWorld> loadedWorlds = new HashMap<>();
         final Map<World, ClaimWorld> worlds = getDatabase().getClaimWorlds(getServerName());
         worlds.forEach((world, claimWorld) -> loadedWorlds.put(world.getName(), claimWorld));
         for (final World serverWorld : getWorlds()) {
-            if (getSettings().isUnclaimableWorld(serverWorld)) {
+            if (getSettings().getGeneral().isUnclaimableWorld(serverWorld)) {
                 continue;
             }
 
@@ -270,7 +225,7 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
         final int claimCount = claimWorlds.stream().mapToInt(ClaimWorld::getClaimCount).sum();
         final int worldCount = claimWorlds.size();
         log(Level.INFO, "Loaded " + claimCount + " claim(s) across " + worldCount + " world(s) in " +
-                (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d) + " seconds");
+            (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d) + " seconds");
     }
 
     default void loadTowns() throws IllegalStateException {
@@ -281,19 +236,19 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
         final int townCount = getTowns().size();
         final int memberCount = getTowns().stream().mapToInt(town -> town.getMembers().size()).sum();
         log(Level.INFO, "Loaded " + townCount + " town(s) with " + memberCount + " member(s) in " +
-                (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d) + " seconds");
+            (ChronoUnit.MILLIS.between(startTime, LocalTime.now()) / 1000d) + " seconds");
     }
 
     default Optional<Town> findTown(int id) {
         return getTowns().stream()
-                .filter(town -> town.getId() == id)
-                .findFirst();
+            .filter(town -> town.getId() == id)
+            .findFirst();
     }
 
     default Optional<Town> findTown(@NotNull String name) {
         return getTowns().stream()
-                .filter(town -> town.getName().equalsIgnoreCase(name))
-                .findFirst();
+            .filter(town -> town.getName().equalsIgnoreCase(name))
+            .findFirst();
     }
 
     @NotNull
@@ -301,12 +256,12 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
 
     default Optional<TownClaim> getClaimAt(@NotNull Chunk chunk, @NotNull World world) {
         return Optional.ofNullable(getClaimWorlds().get(world.getName()))
-                .flatMap(claimWorld -> claimWorld.getClaimAt(chunk, this));
+            .flatMap(claimWorld -> claimWorld.getClaimAt(chunk, this));
     }
 
     default Optional<TownClaim> getClaimAt(@NotNull Position position) {
         return Optional.ofNullable(getClaimWorlds().get(position.getWorld().getName()))
-                .flatMap(claimWorld -> claimWorld.getClaimAt(position.getChunk(), this));
+            .flatMap(claimWorld -> claimWorld.getClaimAt(position.getChunk(), this));
     }
 
     default Optional<ClaimWorld> getClaimWorld(@NotNull World world) {
@@ -364,28 +319,6 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
 
     void log(@NotNull Level level, @NotNull String message, @NotNull Throwable... throwable);
 
-    default void loadConfig() throws RuntimeException {
-        try {
-            setSettings(Annotaml.create(new File(getDataFolder(), "config.yml"), Settings.class).get());
-            setRoles(Annotaml.create(new File(getDataFolder(), "roles.yml"), Roles.class).get());
-            setRulePresets(Annotaml.create(new File(getDataFolder(), "rules.yml"), Presets.class).get());
-            setFlags(Annotaml.create(new File(getDataFolder(), "flags.yml"), Flags.class).get());
-            setLevels(Annotaml.create(new File(getDataFolder(), "levels.yml"), new Levels()).get());
-            setLocales(Annotaml.create(new File(getDataFolder(), "messages-" + getSettings().getLanguage() + ".yml"),
-                    Annotaml.create(Locales.class, getResource("locales/" + getSettings().getLanguage() + ".yml")).get()).get());
-            setSpecialTypes(Annotaml.create(SpecialTypes.class, getResource("data/special_types.yml")).get());
-            if (getSettings().doCrossServer()) {
-                setServer(Annotaml.create(new File(getDataFolder(), "server.yml"), Server.class).get());
-            }
-            if (getSettings().doAdvancements()) {
-                loadAdvancements();
-            }
-        } catch (IOException | InvocationTargetException | InstantiationException | IllegalAccessException e) {
-            log(Level.SEVERE, "Failed to load configuration files", e);
-            throw new RuntimeException(e);
-        }
-    }
-
     default void reload() {
         setLoaded(false);
         loadConfig();
@@ -395,35 +328,37 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
     @NotNull
     default List<Command> getCommands() {
         return List.of(
-                new HuskTownsCommand(this),
-                new TownCommand(this),
-                new AdminTownCommand(this)
+            new HuskTownsCommand(this),
+            new TownCommand(this),
+            new AdminTownCommand(this)
         );
     }
 
     @NotNull
     default Database loadDatabase() throws RuntimeException {
-        final Database database = switch (getSettings().getDatabaseType()) {
+        final Database.Type databaseType = getSettings().getDatabase().getType();
+        final Database database = switch (databaseType) {
             case MYSQL, MARIADB -> new MySqlDatabase(this);
             case SQLITE -> new SqLiteDatabase(this);
         };
         database.initialize();
-        log(Level.INFO, "Successfully initialized the " + getSettings().getDatabaseType().getDisplayName() + " database");
+        log(Level.INFO, "Successfully initialized the " + databaseType.getDisplayName() + " database");
         return database;
     }
 
     @Nullable
     default Broker loadBroker() throws RuntimeException {
-        if (!getSettings().doCrossServer()) {
+        if (!getSettings().getCrossServer().isEnabled()) {
             return null;
         }
 
-        final Broker broker = switch (getSettings().getBrokerType()) {
+        final Broker.Type brokerType = getSettings().getCrossServer().getBrokerType();
+        final Broker broker = switch (brokerType) {
             case PLUGIN_MESSAGE -> new PluginMessageBroker(this);
             case REDIS -> new RedisBroker(this);
         };
         broker.initialize();
-        log(Level.INFO, "Successfully initialized the " + getSettings().getBrokerType().getDisplayName() + " broker");
+        log(Level.INFO, "Successfully initialized the " + brokerType.getDisplayName() + " broker");
         return broker;
     }
 
@@ -437,20 +372,20 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
     @NotNull
     default UpdateChecker getUpdateChecker() {
         return UpdateChecker.builder()
-                .currentVersion(getVersion())
-                .resource(Integer.toString(SPIGOT_RESOURCE_ID))
-                .endpoint(UpdateChecker.Endpoint.SPIGOT)
-                .build();
+            .currentVersion(getVersion())
+            .resource(Integer.toString(SPIGOT_RESOURCE_ID))
+            .endpoint(UpdateChecker.Endpoint.SPIGOT)
+            .build();
     }
 
     default void checkForUpdates() {
-        if (getSettings().doCheckForUpdates()) {
+        if (getSettings().isCheckForUpdates()) {
             getUpdateChecker().check().thenAccept(updated -> {
                 if (updated.isUpToDate()) {
                     return;
                 }
                 log(Level.WARNING, "A new version of HuskTowns is available: v" + updated.getLatestVersion()
-                        + " (Running: v" + getVersion() + ")");
+                    + " (Running: v" + getVersion() + ")");
             });
         }
     }
@@ -460,75 +395,57 @@ public interface HuskTowns extends Task.Supplier, EventDispatcher, GlobalUserLis
 
     default Optional<? extends OnlineUser> findOnlineUser(@NotNull String username) {
         return getOnlineUsers().stream()
-                .filter(online -> online.getUsername().equalsIgnoreCase(username))
-                .findFirst();
+            .filter(online -> online.getUsername().equalsIgnoreCase(username))
+            .findFirst();
     }
 
     default void teleportUser(@NotNull OnlineUser user, @NotNull Position position, @Nullable String server,
                               boolean instant) {
         final String targetServer = server != null ? server : getServerName();
         getTeleportationHook().ifPresentOrElse(
-                hook -> hook.teleport(user, position, targetServer, instant),
-                () -> {
-                    if (getSettings().doCrossServer() && !targetServer.equals(getServerName())) {
-                        final Optional<Preferences> optionalPreferences = getUserPreferences(user.getUuid());
-                        optionalPreferences.ifPresent(preferences -> runAsync(() -> {
-                            preferences.setTeleportTarget(position);
-                            getDatabase().updateUser(user, preferences);
-                            getMessageBroker().ifPresent(broker -> broker.changeServer(user, targetServer));
-                        }));
-                        return;
-                    }
-
-                    runSync(() -> {
-                        user.teleportTo(position);
-                        getLocales().getLocale("teleportation_complete")
-                                .ifPresent(locale -> user.sendMessage(getSettings().getNotificationSlot(), locale));
-                    });
+            hook -> hook.teleport(user, position, targetServer, instant),
+            () -> {
+                if (getSettings().getCrossServer().isEnabled() && !targetServer.equals(getServerName())) {
+                    final Optional<Preferences> optionalPreferences = getUserPreferences(user.getUuid());
+                    optionalPreferences.ifPresent(preferences -> runAsync(() -> {
+                        preferences.setTeleportTarget(position);
+                        getDatabase().updateUser(user, preferences);
+                        getMessageBroker().ifPresent(broker -> broker.changeServer(user, targetServer));
+                    }));
+                    return;
                 }
+
+                runSync(() -> {
+                    user.teleportTo(position);
+                    getLocales().getLocale("teleportation_complete").ifPresent(
+                        locale -> user.sendMessage(getSettings().getGeneral().getNotificationSlot(), locale)
+                    );
+                }, user);
+            }
         );
     }
 
     double getHighestYAt(double x, double z, @NotNull World world);
 
-    @NotNull
-    List<Hook> getHooks();
-
-    default void registerHook(@NotNull Hook hook) {
-        getHooks().add(hook);
-    }
-
-    default void loadHooks() {
-        getHooks().stream().filter(Hook::isDisabled).forEach(Hook::enable);
-        log(Level.INFO, "Successfully loaded " + getHooks().size() + " hooks");
-    }
-
-    default <T extends Hook> Optional<T> getHook(@NotNull Class<T> hookClass) {
-        return getHooks().stream()
-                .filter(hook -> hookClass.isAssignableFrom(hook.getClass()))
-                .map(hookClass::cast)
-                .findFirst();
-    }
-
     default Optional<EconomyHook> getEconomyHook() {
-        return getHook(EconomyHook.class);
+        return getHookManager().getHook(EconomyHook.class);
     }
 
     @NotNull
     default String formatMoney(@NotNull BigDecimal amount) {
         return getEconomyHook()
-                .map(hook -> hook.formatMoney(amount))
-                .orElse(getLocales().getRawLocale(
-                        "town_points_format", Integer.toString(amount.intValue())
-                ).orElse(Integer.toString(amount.intValue())));
+            .map(hook -> hook.formatMoney(amount))
+            .orElse(getLocales().getRawLocale(
+                "town_points_format", Integer.toString(amount.intValue())
+            ).orElse(Integer.toString(amount.intValue())));
     }
 
     default Optional<MapHook> getMapHook() {
-        return getHook(MapHook.class);
+        return getHookManager().getHook(MapHook.class);
     }
 
     default Optional<TeleportationHook> getTeleportationHook() {
-        return getHook(TeleportationHook.class);
+        return getHookManager().getHook(TeleportationHook.class);
     }
 
     void dispatchCommand(@NotNull String command);

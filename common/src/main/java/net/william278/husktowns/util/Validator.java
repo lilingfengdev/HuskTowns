@@ -20,6 +20,7 @@
 package net.william278.husktowns.util;
 
 import net.william278.husktowns.HuskTowns;
+import net.william278.husktowns.config.Settings;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -46,7 +47,7 @@ public class Validator {
      */
     public boolean isValidTownName(@NotNull String name) {
         return plugin.getTowns().stream().noneMatch(town -> town.getName().equalsIgnoreCase(name))
-                && isLegalTownName(name);
+            && isLegalTownName(name);
     }
 
     /**
@@ -56,11 +57,12 @@ public class Validator {
      * @return True if the town name is valid as per the plugin settings, false otherwise
      */
     public boolean isLegalTownName(@NotNull String name) {
-        return (name.matches(plugin.getSettings().getTownNameRegex()) || !plugin.getSettings().doRestrictTownNames())
-                && !containsWhitespace(name)
-                && name.length() <= MAX_TOWN_NAME_LENGTH && name.length() >= MIN_TOWN_NAME_LENGTH
-                && plugin.getSettings().isTownNameAllowed(name)
-                && !name.equalsIgnoreCase(plugin.getSettings().getAdminTownName());
+        final Settings.TownSettings settings = plugin.getSettings().getTowns();
+        return (name.matches(settings.getTownNameRegex()) || !settings.isRestrictTownNames())
+            && !containsWhitespace(name)
+            && name.length() <= MAX_TOWN_NAME_LENGTH && name.length() >= MIN_TOWN_NAME_LENGTH
+            && plugin.getSettings().getGeneral().isTownNameAllowed(name)
+            && !name.equalsIgnoreCase(settings.getAdminTown().getName());
     }
 
     /**
@@ -70,8 +72,9 @@ public class Validator {
      * @return Whether the meta is valid against the plugin settings
      */
     public boolean isValidTownMetadata(@NotNull String meta) {
-        return (meta.matches(plugin.getSettings().getTownMetaRegex()) || !plugin.getSettings().doRestrictTownBios())
-                && meta.length() <= MAX_TOWN_META_LENGTH;
+        final Settings.TownSettings settings = plugin.getSettings().getTowns();
+        return (meta.matches(settings.getTownMetaRegex()) || !settings.isRestrictTownBios())
+            && meta.length() <= MAX_TOWN_META_LENGTH;
     }
 
     // Check if a string contains whitespace

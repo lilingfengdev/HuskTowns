@@ -30,14 +30,12 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.event.player.PlayerEvent;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * {@inheritDoc}
- */
 public class PlayerEnterTownEvent extends PlayerEvent implements IPlayerEnterTownEvent, Cancellable {
 
     private static final HandlerList HANDLER_LIST = new HandlerList();
     private boolean isCancelled = false;
 
+    private final BukkitUser user;
     private final TownClaim claim;
     private final Position movedFrom;
     private final Position movedTo;
@@ -45,6 +43,7 @@ public class PlayerEnterTownEvent extends PlayerEvent implements IPlayerEnterTow
     public PlayerEnterTownEvent(@NotNull BukkitUser user, @NotNull TownClaim claim,
                                 @NotNull Position fromPosition, @NotNull Position toPosition) {
         super(user.getPlayer());
+        this.user = user;
         this.claim = claim;
         this.movedFrom = fromPosition;
         this.movedTo = toPosition;
@@ -53,7 +52,7 @@ public class PlayerEnterTownEvent extends PlayerEvent implements IPlayerEnterTow
     @Override
     @NotNull
     public OnlineUser getUser() {
-        return BukkitUser.adapt(getPlayer());
+        return user;
     }
 
     @Override
